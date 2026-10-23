@@ -8,6 +8,9 @@ This repository provides everything needed to go from those reads to the figures
 statistics reported in the manuscript: the processed ASV tables, taxonomy, phylogenetic
 trees, sample metadata, and the full analysis script.
 
+**[View the full analysis notebook (rendered HTML)](https://htmlpreview.github.io/?https://github.com/rahulnccs/Environmental-microbial-extracts-for-longitudinal-studies-of-gut-microbiome-assembly-and-maintenance/blob/main/analysis/CME_MethodPaper_Analysis.html)**
+— code, figures, and statistics inline, rendered directly in the browser.
+
 ## Contents
 
 ```
