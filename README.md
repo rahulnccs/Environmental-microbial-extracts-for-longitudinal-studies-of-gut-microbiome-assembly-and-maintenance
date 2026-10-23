@@ -1,7 +1,7 @@
 # Environmental microbial extracts for longitudinal studies of gut microbiome assembly and maintenance
 
-Supporting data and analysis code for the manuscript (ISME Communications, manuscript ID
-ISMECOMMUN-D-26-00396) by Rahul Bodkhe, Rebecca Choi, and Michael Shapira.
+Supporting data and analysis code for the manuscript titled as Environmental microbial extracts for longitudinal studies of gut microbiome assembly
+and maintenance by Rahul Bodkhe, Rebecca Choi, and Michael Shapira.
 
 Raw sequencing reads are deposited in the NCBI SRA under accession **PRJNA1462967**.
 This repository provides everything needed to go from those reads to the figures and
