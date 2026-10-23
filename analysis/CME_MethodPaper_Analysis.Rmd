@@ -1,0 +1,817 @@
+---
+title: "CME Microbiome Method Paper — Complete Analysis Code"
+subtitle: "Figures 1 & 2: CME Stability and CME Aging Experiments"
+author: "Rahul Bodkhe"
+date: "March 3, 2026"
+output:
+  html_document:
+    toc: true
+    toc_float:
+      collapsed: false
+      smooth_scroll: true
+    toc_depth: 3
+    theme: flatly
+    highlight: tango
+    code_folding: hide
+    number_sections: true
+---
+
+```{css, echo=FALSE}
+/* Make the page a bit more readable for reviewers */
+body { font-size: 15px; line-height: 1.7; }
+h1 { border-bottom: 2px solid #2c3e50; padding-bottom: 6px; }
+h2 { color: #2980b9; }
+h3 { color: #27ae60; }
+.panel-info  { background:#eaf4fb; border-left:4px solid #2980b9; padding:10px 14px; border-radius:4px; margin-bottom:12px; }
+blockquote   { border-left: 4px solid #e67e22; background:#fef9f0; padding:8px 14px; }
+```
+
+```{r global-setup, include=FALSE}
+knitr::opts_chunk$set(
+  message = FALSE,
+  warning = FALSE,
+  echo    = TRUE,
+  fig.align = "center"
+)
+```
+
+---
+
+::: {.panel-info}
+**How to read this document**  
+All R code is hidden by default — click **Code** on the right of each section to expand it.  
+Statistical outputs and plots are shown inline.  
+PDF files for each panel are saved to the working directory for import into Adobe Illustrator.
+:::
+
+> **Data availability**  
+> Raw sequencing reads: NCBI SRA (accession provided in manuscript).  
+> Processed phyloseq objects and OTU/taxonomy tables are exported as CSV files by this script.
+
+---
+
+# Libraries
+
+```{r setup, include=TRUE}
+library(phyloseq)
+library(ggplot2)
+library(microbiome)
+library(dplyr)
+library(vegan)
+library(forcats)
+library(picante)
+library(phytools)
+library(rstatix)
+library(colorspace)
+library(RColorBrewer)
+library(patchwork)
+library(cowplot)
+library(lme4)
+library(lmerTest)
+```
+
+---
+
+# Shared Color Map {.tabset}
+
+The same Family → Genus color lookup is used across all figures so that identical taxa always appear in identical colors.
+
+```{r shared-colormap}
+family_base_colors <- c(
+  "Acetobacteraceae"       = "#08519C",
+  "Acholeplasmataceae"     = "lightyellow",
+  "Alcaligenaceae"         = "#FF00FF",
+  "Alcanivoracaceae1"      = "#E43FAD",
+  "Alteromonadaceae"       = "#EA6CC0",
+  "Azospirillaceae"        = "#666600",
+  "Bacillaceae"            = "#4B0082",
+  "Brevibacillaceae"       = "#B2DF8A",
+  "Brevibacteriaceae"      = "#114578",
+  "Caulobacteraceae"       = "#185EA5",
+  "Cellvibrionaceae"       = "#1E78D2",
+  "Chitinophagaceae"       = "#FFFF00",
+  "Clostridiaceae"         = "#6CABEA",
+  "Comamonadaceae"         = "#FFD700",
+  "Corynebacteriaceae"     = "#117878",
+  "Crocinitomicaceae"      = "#18A5A5",
+  "Cyclobacteriaceae"      = "#3FE4E4",
+  "Cytophagaceae"          = "#D1A33D",
+  "Dermabacteraceae"       = "#666600",
+  "Devosiaceae"            = "orange",
+  "Dietziaceae"            = "lightcyan",
+  "Enterobacteriaceae"     = "red",
+  "Flavobacteriaceae"      = "#D1A33D",
+  "Gemmatimonadaceae"      = "darkorange1",
+  "JG30-KF-CM45"          = "#8A2BE2",
+  "Kaistiaceae"            = "#c51b7d",
+  "Lachnospiraceae"        = "#A6CEE3",
+  "Lactobacillaceae"       = "#41AB5D",
+  "Lysobacteraceae"        = "#98F0C4",
+  "Microbacteriaceae"      = "#1E90FF",
+  "Micrococcaceae"         = "orange",
+  "Moraxellaceae"          = "#D2D21E",
+  "Myxococcaceae"          = "#E4E43F",
+  "Nocardiaceae"           = "#A5A518",
+  "Oxalobacteraceae"       = "#F0F098",
+  "Paenibacillaceae"       = "#6A3D9A",
+  "Pirellulaceae"          = "#784511",
+  "Planococcaceae"         = "#A55E18",
+  "Pseudomonadaceae"       = "lightblue",
+  "Rhizobiaceae"           = "#7570B3",
+  "Rhodocyclaceae"         = "#800080",
+  "Rubinisphaeraceae"      = "#1E90FF",
+  "Saprospiraceae"         = "darkseagreen",
+  "Solirubrobacteraceae"   = "#17BECF",
+  "Sphingobacteriaceae"    = "#33A02C",
+  "Spirosomaceae"          = "#599861",
+  "Sporolactobacillaceae"  = "purple",
+  "Staphylococcaceae"      = "#D2781E",
+  "Thermoactinomycetaceae" = "#771155",
+  "Thermomonosporaceae"    = "#AA4488",
+  "Verrucomicrobiaceae"    = "#228B22",
+  "Xanthomonadaceae"       = "darkolivegreen1",
+  "Arcobacteraceae"        = "lightpink"
+)
+
+taxa_files <- c(
+  "../00_InputFiles/04_RDSfilesFromWynton/Figure01_CME_Stab_taxonomy.rds",
+  "../00_InputFiles/04_RDSfilesFromWynton/Figure_02_CME_Aging_taxonomy.rds",
+  "../00_InputFiles/04_RDSfilesFromWynton/Figure_03_BCEP_Aging_taxonomy.rds"
+)
+tax_all <- do.call(rbind, lapply(taxa_files, function(f) {
+  tt <- readRDS(f)
+  data.frame(Family = as.character(tt[, "Family"]),
+             Genus  = as.character(tt[, "Genus"]),
+             stringsAsFactors = FALSE)
+}))
+tax_all$Family[is.na(tax_all$Family)] <- "Unclassified Family"
+tax_all <- unique(tax_all)
+
+families     <- sort(unique(tax_all$Family))
+missing_fams <- setdiff(families, names(family_base_colors))
+if (length(missing_fams) > 0) {
+  extra <- colorRampPalette(brewer.pal(8, "Dark2"))(length(missing_fams))
+  family_base_colors <- c(family_base_colors, setNames(extra, missing_fams))
+}
+
+genus_color_list <- lapply(families, function(fam) {
+  fam_rows         <- tax_all[tax_all$Family == fam, ]
+  genera           <- sort(unique(fam_rows$Genus[!is.na(fam_rows$Genus)]))
+  has_unclassified <- any(is.na(fam_rows$Genus))
+  labels <- c(paste0(fam, ": ", genera),
+              if (has_unclassified) paste(fam, "unclassified_genus"))
+  n        <- length(labels)
+  base_col <- family_base_colors[[fam]]
+  if (n == 1) {
+    shades <- base_col
+  } else {
+    amounts <- seq(-0.35, 0.45, length.out = n)
+    shades  <- vapply(amounts, function(a) {
+      if (a < 0) colorspace::darken(base_col, amount = -a)
+      else       colorspace::lighten(base_col, amount =  a)
+    }, character(1))
+  }
+  setNames(shades, labels)
+})
+
+my_colors_genus                       <- unlist(genus_color_list)
+my_colors_genus["Genus < 2% abund."] <- "lightgrey"
+
+# Save to disk so any chunk that follows an rm(list=ls()) can reload instantly
+saveRDS(my_colors_genus,    "my_colors_genus.rds")
+saveRDS(family_base_colors, "family_base_colors.rds")
+```
+
+---
+
+# Figure 1 — CME Stability
+
+> | Panel | Description |
+> |-------|-------------|
+> | **A** | Schematic — assembled in Adobe Illustrator |
+> | **B** | Stacked bar: Genus-level composition (Stock CME + Seeded plates, by Day/Replicate) |
+> | **C** | Alpha diversity over time: Observed, Shannon, Faith's PD — **CME Stock** only |
+> | **D** | Alpha diversity over time: Observed, Shannon, Faith's PD — **Seeded plates** only |
+> | **E** | PCA ordination (CLR / Euclidean distance) |
+> | **F** | PCoA ordination (Weighted UniFrac) |
+
+## Build Phyloseq Object
+
+```{r fig1-build-phyloseq}
+rm(list = ls())
+seqtab.nochim <- readRDS("../00_InputFiles/04_RDSfilesFromWynton/Figure01_CME_Stab_seqtab.rds")
+taxa          <- readRDS("../00_InputFiles/04_RDSfilesFromWynton/Figure01_CME_Stab_taxonomy.rds")
+fitGTR        <- readRDS("../00_InputFiles/04_RDSfilesFromWynton/Figure01_CME_Stab_fitGTR.rds")
+meta_table    <- read.csv("../00_InputFiles/05_MetdataFiles/metadata.csv",
+                          row.names = 1, check.names = FALSE)
+
+samdf         <- sample_data(meta_table)
+unrooted_tree <- fitGTR$tree
+
+ps1   <- phyloseq(otu_table(seqtab.nochim, taxa_are_rows = FALSE),
+                  tax_table(taxa), phy_tree(unrooted_tree), samdf)
+
+pseq0 <- subset_taxa(ps1,  Family != "Mitochondria")
+pseq1 <- prune_taxa(taxa_sums(pseq0) > 9, pseq0)
+pseq  <- prune_samples(sample_sums(pseq1) >= 9, pseq1)
+
+# Recode weekly labels → day numbers to match figure axis labels
+sample_data(pseq)$Day <- dplyr::recode(
+  as.character(sample_data(pseq)$Day),
+  "Wk01" = "D05", "Wk02" = "D08"
+)
+
+saveRDS(pseq, "Figure01_CEP_Age_pseq.rds")
+pseq
+```
+
+### Supplementary Data Export
+
+```{r fig1-supp-export, message=FALSE}
+write.csv(as.data.frame(otu_table(pseq)), "Supplementary_OTU_Table_Figure01.csv")
+write.csv(as.data.frame(tax_table(pseq)), "Supplementary_Taxonomy_Table_Figure01.csv")
+message("Supplementary files written for Figure 1.")
+```
+
+## Panel B — Stacked Bar Plot (Genus Level)
+
+```{r fig1B-prep}
+# Note: no rm(list=ls()) here — my_colors_genus from the shared colormap must persist
+pseq <- readRDS("Figure01_CEP_Age_pseq.rds")
+
+y1 <- tax_glom(pseq, taxrank = "Genus", NArm = FALSE)
+y3 <- transform_sample_counts(y1, function(x) x / sum(x))
+y4 <- psmelt(y3)
+y4$Family <- as.character(y4$Family)
+y4$Genus  <- as.character(y4$Genus)
+y4$Family[is.na(y4$Family)] <- "Unclassified Family"
+y4$FamilyGenus <- ifelse(is.na(y4$Genus),
+                         paste(y4$Family, "unclassified_genus"),
+                         paste0(y4$Family, ": ", y4$Genus))
+y4$FamilyGenus[y4$Abundance < 0.02] <- "Genus < 2% abund."
+```
+
+```{r fig1B-colormap-apply}
+# Reload color map in case a prior rm(list=ls()) cleared the environment
+if (!exists("my_colors_genus"))    my_colors_genus    <- readRDS("my_colors_genus.rds")
+if (!exists("family_base_colors")) family_base_colors <- readRDS("family_base_colors.rds")
+y4$FamilyGenus <- factor(y4$FamilyGenus, levels = names(my_colors_genus))
+```
+
+```{r fig1B-plot, fig.width=20, fig.height=5}
+plot_height_in <- 5
+max_rows       <- max(1, floor(plot_height_in / 0.22))
+legend_ncol    <- ceiling(nlevels(droplevels(y4$FamilyGenus)) / max_rows)
+plot_width_in  <- 20 + max(0, legend_ncol - 2) * 1.3
+
+p_B <- ggplot(y4, aes(x = Replicate, y = Abundance, fill = FamilyGenus)) +
+  geom_bar(stat = "identity", position = "fill") +
+  theme_classic() +
+  scale_fill_manual(values = my_colors_genus) +
+  scale_x_discrete(drop = TRUE) +
+  guides(fill = guide_legend(ncol = legend_ncol, keywidth = 0.4, keyheight = 0.7)) +
+  ylab("Distribution of ASVs at Genus level") +
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1),
+        axis.text   = element_text(face = "bold", size = 12),
+        strip.text.x = element_text(size = 12),
+        legend.text  = element_text(size = 13),
+        panel.grid.major = element_blank()) +
+  facet_grid(cols = vars(Category, Day))
+
+print(p_B)
+ggsave("Fig1B_StackPlot_Genus.pdf", p_B, height = plot_height_in, width = plot_width_in)
+```
+
+## Panels C & D — Alpha Diversity Over Time
+
+### Observed + Shannon
+
+```{r fig1CD-richness, fig.width=8, fig.height=3}
+rm(list = ls())
+pseq <- readRDS("Figure01_CEP_Age_pseq.rds")
+
+richness_data     <- plot_richness(pseq, x = "Replicate",
+                                   measures = c("Observed", "Shannon"))$data
+richness_data$Day <- factor(richness_data$Day, levels = c("D00", "D05", "D08"))
+
+averages_data <- richness_data %>%
+  group_by(Day, Category, variable) %>%
+  dplyr::summarize(avg_value = mean(value, na.rm = TRUE),
+                   sd_value  = sd(value,  na.rm = TRUE), .groups = "drop")
+
+p_C <- ggplot(averages_data %>% filter(Category == "Fresh"),
+              aes(x = Day, y = avg_value, group = variable)) +
+  geom_line(color = "red") +
+  geom_errorbar(aes(ymin = avg_value - sd_value, ymax = avg_value + sd_value),
+                width = 0.2, color = "red") +
+  geom_point(size = 2, color = "red") +
+  facet_wrap(~variable, scales = "free_y") +
+  labs(x = "Day", y = "Mean Index Value", title = "Panel C — CME Stock") +
+  theme_classic(base_size = 12)
+
+p_D <- ggplot(averages_data %>% filter(Category != "Fresh"),
+              aes(x = Day, y = avg_value, group = variable)) +
+  geom_line(color = "darkgreen") +
+  geom_errorbar(aes(ymin = avg_value - sd_value, ymax = avg_value + sd_value),
+                width = 0.2, color = "darkgreen") +
+  geom_point(size = 2, color = "darkgreen") +
+  facet_wrap(~variable, scales = "free_y") +
+  labs(x = "Day", y = "Mean Index Value", title = "Panel D — Seeded Plates") +
+  theme_classic(base_size = 12)
+
+print(p_C); print(p_D)
+ggsave("Fig1C_StockCME_Observed_Shannon.pdf",    p_C, height = 3, width = 6)
+ggsave("Fig1D_SeededPlates_Observed_Shannon.pdf", p_D, height = 3, width = 6)
+```
+
+#### Statistics — Observed & Shannon
+
+```{r fig1CD-alpha-stats}
+sequential_stats <- richness_data %>%
+  group_by(Category, variable) %>%
+  t_test(value ~ Day, comparisons = list(c("D00", "D05"), c("D00", "D08"))) %>%
+  select(Category, variable, group1, group2, n1, n2, p, p.adj) %>%
+  arrange(Category, variable, group1)
+print(as.data.frame(sequential_stats))
+```
+
+### Faith's Phylogenetic Diversity
+
+```{r fig1CD-faith, fig.width=5, fig.height=3}
+rm(list = ls())
+pseq <- readRDS("Figure01_CEP_Age_pseq.rds")
+
+rooted_tree            <- midpoint.root(phy_tree(pseq))
+otu_mat                <- as(otu_table(pseq), "matrix")
+pd_results             <- pd(otu_mat, rooted_tree, include.root = TRUE)
+richness_data          <- data.frame(sample_data(pseq))
+richness_data$Faith_PD <- pd_results$PD
+richness_data$Day      <- factor(richness_data$Day, levels = c("D00", "D05", "D08"))
+
+averages_pd <- richness_data %>%
+  group_by(Day, Category) %>%
+  dplyr::summarize(avg_pd = mean(Faith_PD, na.rm = TRUE),
+                   sd_pd  = sd(Faith_PD,  na.rm = TRUE), .groups = "drop")
+
+p_C_faith <- ggplot(averages_pd %>% filter(Category == "Fresh"),
+                    aes(x = Day, y = avg_pd, group = 1)) +
+  geom_line(color = "red") +
+  geom_errorbar(aes(ymin = avg_pd - sd_pd, ymax = avg_pd + sd_pd),
+                width = 0.2, color = "red") +
+  geom_point(size = 3, color = "red") +
+  labs(x = "Day", y = "Mean Faith Index", title = "Panel C — CME Stock") +
+  theme_classic(base_size = 12)
+
+p_D_faith <- ggplot(averages_pd %>% filter(Category != "Fresh"),
+                    aes(x = Day, y = avg_pd, group = 1)) +
+  geom_line(color = "darkgreen") +
+  geom_errorbar(aes(ymin = avg_pd - sd_pd, ymax = avg_pd + sd_pd),
+                width = 0.2, color = "darkgreen") +
+  geom_point(size = 3, color = "darkgreen") +
+  labs(x = "Day", y = "Mean Faith Index", title = "Panel D — Seeded Plates") +
+  theme_classic(base_size = 12)
+
+print(p_C_faith); print(p_D_faith)
+ggsave("Fig1C_StockCME_FaithPD.pdf",    p_C_faith, height = 3, width = 3)
+ggsave("Fig1D_SeededPlates_FaithPD.pdf", p_D_faith, height = 3, width = 3)
+```
+
+#### Statistics — Faith's PD
+
+```{r fig1CD-faith-stats}
+faith_stats <- richness_data %>%
+  group_by(Category) %>%
+  t_test(Faith_PD ~ Day, comparisons = list(c("D00", "D05"), c("D00", "D08"))) %>%
+  select(Category, group1, group2, n1, n2, p, p.adj) %>%
+  arrange(Category, group1)
+print(as.data.frame(faith_stats))
+```
+
+## Panel E — PCA (CLR / Euclidean)
+
+```{r fig1E-pca, fig.width=5, fig.height=3.5}
+rm(list = ls())
+pseq     <- prune_taxa(taxa_sums(readRDS("Figure01_CEP_Age_pseq.rds")) > 1,
+                       readRDS("Figure01_CEP_Age_pseq.rds"))
+day_cols <- c("D00" = "#73C474", "D05" = "#F89452", "D08" = "#DE402E")
+
+pseq.clr    <- microbiome::transform(pseq, "clr")
+ord_pca_clr <- ordinate(pseq.clr, "RDA", "euclidean")
+evals       <- ord_pca_clr$CA$eig
+pc1_var     <- round(100 * evals[1] / sum(evals), 1)
+pc2_var     <- round(100 * evals[2] / sum(evals), 1)
+
+p_E <- plot_ordination(pseq.clr, ord_pca_clr, shape = "Category", color = "Day") +
+  geom_point(size = 4) +
+  xlab(paste0("[", pc1_var, "%]")) + ylab(paste0("[", pc2_var, "%]")) +
+  ggtitle("Euclidean distance") +
+  theme_classic(base_size = 12) +
+  theme(plot.title = element_text(hjust = 0.5, face = "bold")) +
+  scale_color_manual(values = day_cols)
+
+print(p_E)
+ggsave("Fig1E_PCA_CLR.pdf", p_E, height = 3.5, width = 5)
+```
+
+#### PERMANOVA — Overall, Stock CME, Seeded Plates
+
+```{r fig1E-permanova}
+dist_clr <- phyloseq::distance(pseq.clr, method = "euclidean")
+metadata <- data.frame(sample_data(pseq.clr))
+cat("--- Overall ---\n");          print(adonis2(dist_clr ~ Category * Day, by = "term", data = metadata))
+
+ps_s <- prune_taxa(taxa_sums(subset_samples(pseq, Category == "Fresh")) > 1,
+                   subset_samples(pseq, Category == "Fresh"))
+cat("--- Within Stock CME ---\n"); print(adonis2(phyloseq::distance(microbiome::transform(ps_s,"clr"), "euclidean") ~ Day,
+                                                 data = data.frame(sample_data(ps_s)), by = "term"))
+
+ps_p <- prune_taxa(taxa_sums(subset_samples(pseq, Category != "Fresh")) > 1,
+                   subset_samples(pseq, Category != "Fresh"))
+cat("--- Within Seeded Plates ---\n"); print(adonis2(phyloseq::distance(microbiome::transform(ps_p,"clr"), "euclidean") ~ Day,
+                                                     data = data.frame(sample_data(ps_p)), by = "term"))
+```
+
+## Panel F — PCoA (Weighted UniFrac)
+
+```{r fig1F-pcoa, fig.width=5, fig.height=3.5}
+rm(list = ls())
+set.seed(123)
+pseq0 <- readRDS("Figure01_CEP_Age_pseq.rds")
+pseq  <- prune_taxa(taxa_sums(pseq0) > 1, pseq0)
+phy_tree(pseq) <- midpoint.root(phy_tree(pseq))
+pseq_rel       <- transform_sample_counts(pseq, function(x) x / sum(x))
+dist_wu        <- distance(pseq_rel, method = "unifrac", weighted = TRUE)
+ord_wu         <- ordinate(pseq_rel, method = "PCoA", distance = dist_wu)
+evals          <- ord_wu$values$Eigenvalues
+day_cols       <- c("D00" = "#73C474", "D05" = "#F89452", "D08" = "#DE402E")
+
+p_F <- plot_ordination(pseq_rel, ord_wu, shape = "Category", color = "Day") +
+  geom_point(size = 4) +
+  xlab(paste0("[", round(100 * evals[1] / sum(evals), 1), "%]")) +
+  ylab(paste0("[", round(100 * evals[2] / sum(evals), 1), "%]")) +
+  ggtitle("Weighted UniFrac distance") +
+  theme_classic(base_size = 12) +
+  theme(plot.title = element_text(hjust = 0.5, face = "bold")) +
+  scale_color_manual(values = day_cols)
+
+print(p_F)
+ggsave("Fig1F_PCoA_wUniFrac.pdf", p_F, height = 3.5, width = 5)
+```
+
+#### PERMANOVA — Overall, Stock CME, Seeded Plates
+
+```{r fig1F-permanova}
+cat("--- Overall ---\n"); print(adonis2(dist_wu ~ Category * Day, by = "term",
+                                        data = data.frame(sample_data(pseq_rel))))
+
+root_sub <- function(ps) { phy_tree(ps) <- midpoint.root(phy_tree(ps)); ps }
+rel_sub  <- function(ps) transform_sample_counts(ps, function(x) x / sum(x))
+
+ps_s <- rel_sub(root_sub(prune_taxa(taxa_sums(subset_samples(pseq, Category == "Fresh")) > 1,
+                                    subset_samples(pseq, Category == "Fresh"))))
+set.seed(123); cat("--- Within Stock CME ---\n")
+print(adonis2(distance(ps_s, "unifrac", weighted=TRUE) ~ Day,
+              data = data.frame(sample_data(ps_s)), permutations = 999, by = "margin"))
+
+ps_p <- rel_sub(root_sub(prune_taxa(taxa_sums(subset_samples(pseq, Category != "Fresh")) > 1,
+                                    subset_samples(pseq, Category != "Fresh"))))
+set.seed(123); cat("--- Within Seeded Plates ---\n")
+print(adonis2(distance(ps_p, "unifrac", weighted=TRUE) ~ Day,
+              data = data.frame(sample_data(ps_p)), permutations = 999, by = "margin"))
+```
+
+---
+
+# Figure 2 — CME Aging (CME-1 & CME-2)
+
+> | Panel | Description |
+> |-------|-------------|
+> | **A** | Stacked bar: Genus-level composition — CME-1 (stock / grazed lawn / worms) & CME-2 |
+> | **B** | PCoA (Weighted UniFrac) — CME-1: Stock CME vs Grazed Lawn vs Worms |
+> | **C** | PCoA (Weighted UniFrac) — CME-2: Stock CME vs Grazed Lawn vs Worms |
+> | **D** | Shannon diversity over time — Worms on CME-1 & Worms on CME-2 |
+
+## Build Phyloseq Objects
+
+### CME-1
+
+```{r fig2-build-cme1}
+rm(list = ls())
+seqtab.nochim <- readRDS("../00_InputFiles/04_RDSfilesFromWynton/Figure_02_CME_Aging_seqtab.rds")
+taxa          <- readRDS("../00_InputFiles/04_RDSfilesFromWynton/Figure_02_CME_Aging_taxonomy.rds")
+fitGTR        <- readRDS("../00_InputFiles/04_RDSfilesFromWynton/Figure_02_CME_Aging_fitGTR.rds")
+meta_table    <- read.csv("../00_InputFiles/05_MetdataFiles/metadata.csv",
+                          row.names = 1, check.names = FALSE)
+samdf         <- sample_data(meta_table)
+ps1   <- phyloseq(otu_table(seqtab.nochim, taxa_are_rows = FALSE),
+                  tax_table(taxa), phy_tree(fitGTR$tree), samdf)
+pseq0 <- subset_taxa(ps1,  Family != "Mitochondria")
+pseq1 <- prune_taxa(taxa_sums(pseq0) > 2, pseq0)
+pseq  <- prune_samples(sample_sums(pseq1) >= 9, pseq1)
+saveRDS(pseq, "Figure_02_CME_Aging_pseq.rds")
+write.csv(as.data.frame(otu_table(pseq)), "Supplementary_OTU_Table_Figure02_CME1.csv")
+write.csv(as.data.frame(tax_table(pseq)), "Supplementary_Taxonomy_Table_Figure02_CME1.csv")
+pseq
+```
+
+### CME-2
+
+```{r fig2-build-cme2}
+seqtab.nochim <- readRDS("../00_InputFiles/04_RDSfilesFromWynton/Figure_03_BCEP_Aging_seqtab.rds")
+taxa          <- readRDS("../00_InputFiles/04_RDSfilesFromWynton/Figure_03_BCEP_Aging_taxonomy.rds")
+fitGTR        <- readRDS("../00_InputFiles/04_RDSfilesFromWynton/Figure_03_BCEP_Stab_fitGTR.rds")
+meta_table    <- read.csv("../00_InputFiles/05_MetdataFiles/metadata.csv",
+                          row.names = 1, check.names = FALSE)
+samdf  <- sample_data(meta_table)
+phylo  <- phyloseq(otu_table(seqtab.nochim, taxa_are_rows = FALSE),
+                   tax_table(taxa), phy_tree(fitGTR$tree), samdf)
+ps0    <- subset_samples(phylo,
+           SampleType == "worm" | SampleType == "Grazed_Lawn" |
+           (SampleType == "Stock_CME" & Day == "D07"))
+ps1    <- subset_samples(ps0, Experiment != "CEP_Age" & !(Day %in% c("D02", "D04")))
+pseq0  <- subset_taxa(ps1,  Family != "Mitochondria")
+pseq1  <- prune_taxa(taxa_sums(pseq0) > 2, pseq0)
+pseq   <- prune_samples(sample_sums(pseq1) >= 9, pseq1)
+saveRDS(pseq, "Figure_03_BCME_Aging_pseq.rds")
+write.csv(as.data.frame(otu_table(pseq)), "Supplementary_OTU_Table_Figure02_CME2.csv")
+write.csv(as.data.frame(tax_table(pseq)), "Supplementary_Taxonomy_Table_Figure02_CME2.csv")
+pseq
+```
+
+### Merge CME-1 + CME-2
+
+```{r fig2-merge}
+rm(list = ls())
+ps1 <- readRDS("Figure_02_CME_Aging_pseq.rds")
+ps2 <- readRDS("Figure_03_BCME_Aging_pseq.rds")
+ps1_noTree <- phyloseq(otu_table(ps1), tax_table(ps1), sample_data(ps1))
+ps2_noTree <- phyloseq(otu_table(ps2), tax_table(ps2), sample_data(ps2))
+ps_merged  <- merge_phyloseq(ps1_noTree, ps2_noTree)
+pseq0 <- subset_taxa(ps_merged, Family != "Mitochondria")
+pseq1 <- prune_taxa(taxa_sums(pseq0) > 1, pseq0)
+pseq  <- prune_samples(sample_sums(pseq1) >= 9, pseq1)
+saveRDS(pseq, "CEPBCEPAging.rds")
+pseq
+```
+
+## Panel A — Stacked Bar Plots (CME-1 & CME-2)
+
+```{r fig2A-prep}
+# Reload shared color objects cleared by earlier rm(list=ls())
+if (!exists("my_colors_genus"))    my_colors_genus    <- readRDS("my_colors_genus.rds")
+if (!exists("family_base_colors")) family_base_colors <- readRDS("family_base_colors.rds")
+
+always_show_families <- "Enterobacteriaceae"
+collapse_threshold   <- 0.02
+
+prep_genus_data <- function(path) {
+  ps <- readRDS(path)
+  y4 <- psmelt(transform_sample_counts(tax_glom(ps, "Genus", NArm=FALSE), function(x) x/sum(x)))
+  y4$Family <- as.character(y4$Family);  y4$Genus <- as.character(y4$Genus)
+  y4$Family[is.na(y4$Family)] <- "Unclassified Family"
+  y4$FamilyGenus <- ifelse(is.na(y4$Genus),
+    paste(y4$Family, "unclassified_genus"), paste0(y4$Family, ": ", y4$Genus))
+  y4$FamilyGenus[y4$Abundance < collapse_threshold &
+                 !(y4$Family %in% always_show_families)] <- "Genus < 2% abund."
+  y4
+}
+
+y4_cme1 <- prep_genus_data("Figure_02_CME_Aging_pseq.rds")
+y4_cme2 <- prep_genus_data("Figure_03_BCME_Aging_pseq.rds")
+```
+
+```{r fig2A-union-legend}
+combined_abund <- dplyr::bind_rows(
+  y4_cme1[, c("Family","FamilyGenus","Abundance")],
+  y4_cme2[, c("Family","FamilyGenus","Abundance")])
+family_rank <- combined_abund %>% group_by(Family) %>%
+  summarise(total=sum(Abundance),.groups="drop") %>% arrange(desc(total)) %>% pull(Family)
+genus_rank  <- combined_abund %>% filter(FamilyGenus != "Genus < 2% abund.") %>%
+  group_by(Family, FamilyGenus) %>% summarise(total=sum(Abundance),.groups="drop")
+ordered_levels <- unlist(lapply(family_rank, function(f)
+  genus_rank %>% filter(Family==f) %>% arrange(desc(total)) %>% pull(FamilyGenus)), use.names=FALSE)
+present      <- union(unique(y4_cme1$FamilyGenus), unique(y4_cme2$FamilyGenus))
+union_levels <- ordered_levels[ordered_levels %in% names(my_colors_genus)]
+if ("Genus < 2% abund." %in% present) union_levels <- c(union_levels, "Genus < 2% abund.")
+missing_c <- setdiff(union_levels, names(my_colors_genus))
+if (length(missing_c) > 0) {
+  my_colors_genus <- c(my_colors_genus,
+    setNames(colorRampPalette(brewer.pal(8,"Set3"))(length(missing_c)), missing_c))
+}
+y4_cme1$FamilyGenus <- factor(y4_cme1$FamilyGenus, levels = union_levels)
+y4_cme2$FamilyGenus <- factor(y4_cme2$FamilyGenus, levels = union_levels)
+
+panel_h   <- 5; total_h <- 2 * panel_h + 0.3; panel_w <- 20
+max_rows  <- max(1, floor(total_h / 0.22)); leg_ncol <- ceiling(length(union_levels)/max_rows)
+leg_w     <- 2 + max(0, leg_ncol - 1) * 1.3; total_w <- panel_w + leg_w
+```
+
+```{r fig2A-plot, fig.width=22, fig.height=10.3}
+build_p <- function(y4, ylab) {
+  ggplot(y4, aes(x=Replicate, y=Abundance, fill=FamilyGenus)) +
+    geom_bar(stat="identity", position="fill") + theme_classic() +
+    scale_fill_manual(values=my_colors_genus, limits=union_levels, drop=FALSE) +
+    scale_x_discrete(drop=TRUE) + ylab(ylab) +
+    theme(axis.text.x=element_text(angle=45,vjust=1,hjust=1),
+          axis.text=element_text(face="bold",size=12),
+          strip.text.x=element_text(size=12), legend.position="none",
+          panel.grid.major=element_blank()) +
+    facet_grid(cols=vars(Category,Day), scales="free_x", space="free_x")
+}
+leg_src <- ggplot(data.frame(FamilyGenus=factor(union_levels,levels=union_levels)),
+                  aes(x=1,y=1,fill=FamilyGenus)) + geom_col() +
+  scale_fill_manual(values=my_colors_genus, limits=union_levels, drop=FALSE) +
+  guides(fill=guide_legend(ncol=leg_ncol, keywidth=0.4, keyheight=0.7)) +
+  theme(legend.text=element_text(size=13))
+p_A <- cowplot::plot_grid(
+  build_p(y4_cme1, "CME-1: Distribution of ASVs at Genus level") /
+  build_p(y4_cme2, "CME-2: Distribution of ASVs at Genus level"),
+  cowplot::get_legend(leg_src), ncol=2, rel_widths=c(panel_w, leg_w))
+print(p_A)
+ggsave("Fig2A_StackPlot_CME1_CME2.pdf", p_A, height=total_h, width=total_w, limitsize=FALSE)
+```
+
+## Panels B & C — PCoA (Weighted UniFrac)
+
+```{r fig2BC-load}
+rm(list = ls())
+set.seed(125)
+ps     <- readRDS("CEPBCEPAging.rds")
+fitGTR <- readRDS("Figure2_CEP_BCEP_Stab_fitGTR_Full.rds")
+pseq   <- merge_phyloseq(ps, fitGTR$tree)
+phy_tree(pseq) <- midpoint.root(phy_tree(pseq))
+day_colors <- c(Stock_CME="gray", D00="#1A9850", D01="#66BD63", D03="#A6D96A",
+                D05="#FDAE61", D07="#F46D43", D08="darkred", D09="black")
+```
+
+```{r fig2B-plot, fig.width=5, fig.height=3.5}
+ps_c1  <- prune_taxa(taxa_sums(subset_samples(pseq, Experiment=="CEP_Age"))>1,
+                     subset_samples(pseq, Experiment=="CEP_Age"))
+set.seed(9567)
+ps_c1c <- microbiome::transform(ps_c1, "compositional")
+ord1   <- ordinate(ps_c1c, "PCoA", "unifrac", weighted=TRUE)
+ev1    <- ord1$values$Eigenvalues
+p_B <- plot_ordination(ps_c1c, ord1, shape="Category", color="Day") + geom_point(size=4) +
+  xlab(paste0("PC1 [",round(100*ev1[1]/sum(ev1),1),"%]")) +
+  ylab(paste0("PC2 [",round(100*ev1[2]/sum(ev1),1),"%]")) +
+  ggtitle("CME-1 vs. worms") + theme_classic(base_size=12) +
+  theme(plot.title=element_text(hjust=0.5,face="bold")) +
+  scale_color_manual(values=day_colors) + scale_shape_manual(values=c(15,16,17))
+print(p_B)
+ggsave("Fig2B_PCoA_CME1.pdf", p_B, height=3.5, width=5)
+```
+
+#### PERMANOVA — CME-1
+
+```{r fig2B-permanova}
+phy_tree(ps_c1c) <- phytools::midpoint.root(phy_tree(ps_c1c))
+set.seed(9567); print(adonis2(phyloseq::distance(ps_c1c,"wunifrac") ~ SampleType,
+                              data=data.frame(sample_data(ps_c1c)), permutations=999))
+```
+
+```{r fig2C-plot, fig.width=5, fig.height=3.5}
+ps_c2  <- prune_taxa(taxa_sums(subset_samples(pseq,Experiment!="CEP_Age"&!(Day%in%c("D02","D04"))))>1,
+                     subset_samples(pseq,Experiment!="CEP_Age"&!(Day%in%c("D02","D04"))))
+set.seed(9567)
+ps_c2c <- microbiome::transform(ps_c2, "compositional")
+ord2   <- ordinate(ps_c2c, "PCoA", "unifrac", weighted=TRUE)
+ev2    <- ord2$values$Eigenvalues
+p_C <- plot_ordination(ps_c2c, ord2, shape="Category", color="Day") + geom_point(size=4) +
+  xlab(paste0("PC1 [",round(100*ev2[1]/sum(ev2),1),"%]")) +
+  ylab(paste0("PC2 [",round(100*ev2[2]/sum(ev2),1),"%]")) +
+  ggtitle("CME-2 vs. worms") + theme_classic(base_size=12) +
+  theme(plot.title=element_text(hjust=0.5,face="bold")) +
+  scale_color_manual(values=day_colors) + scale_shape_manual(values=c(15,16,17))
+print(p_C)
+ggsave("Fig2C_PCoA_CME2.pdf", p_C, height=3.5, width=5)
+```
+
+#### PERMANOVA — CME-2
+
+```{r fig2C-permanova}
+phy_tree(ps_c2c) <- phytools::midpoint.root(phy_tree(ps_c2c))
+set.seed(9567); print(adonis2(phyloseq::distance(ps_c2c,"wunifrac") ~ SampleType,
+                              data=data.frame(sample_data(ps_c2c)), permutations=999))
+```
+
+## Panel D — Shannon Diversity (Worms)
+
+```{r fig2D-shannon, fig.width=7, fig.height=3}
+rm(list = ls())
+ps <- readRDS("CEPBCEPAging.rds")
+
+get_shannon <- function(ps, exp) {
+  samdf <- data.frame(sample_data(ps))
+  keep  <- samdf$Experiment == exp & samdf$Category == "worms"
+  ps_s  <- prune_taxa(taxa_sums(prune_samples(rownames(samdf)[keep], ps)) > 1,
+                      prune_samples(rownames(samdf)[keep], ps))
+  plot_richness(ps_s, x="Replicate", measures="Shannon")$data %>%
+    group_by(Day) %>%
+    dplyr::summarize(avg=mean(value,na.rm=TRUE), sd=sd(value,na.rm=TRUE), .groups="drop")
+}
+
+sh1 <- get_shannon(ps, "CEP_Age")
+sh2 <- get_shannon(ps, "BCEP")
+
+make_sh <- function(df, ttl) {
+  ggplot(df, aes(x=Day, y=avg, group=1)) +
+    geom_line(linewidth=0.8) + geom_point(size=2.5) +
+    geom_errorbar(aes(ymin=avg-sd, ymax=avg+sd), width=0.2) +
+    labs(title=ttl, x="Days of adulthood", y="Shannon index") +
+    theme_classic(base_size=12) + theme(plot.title=element_text(hjust=0.5))
+}
+
+p1 <- make_sh(sh1, "Worms on CME-1")
+p2 <- make_sh(sh2, "Worms on CME-2")
+print(p1 + p2)
+ggsave("Fig2D_Shannon_CME1.pdf", p1, height=3, width=3.5)
+ggsave("Fig2D_Shannon_CME2.pdf", p2, height=3, width=3.5)
+```
+
+#### Statistics — Shannon
+
+```{r fig2D-shannon-stats}
+get_rd <- function(ps, exp, ref) {
+  samdf <- data.frame(sample_data(ps))
+  keep  <- samdf$Experiment == exp & samdf$Category == "worms"
+  ps_s  <- prune_taxa(taxa_sums(prune_samples(rownames(samdf)[keep], ps)) > 1,
+                      prune_samples(rownames(samdf)[keep], ps))
+  rd    <- plot_richness(ps_s, x="Replicate", measures="Shannon")$data
+  rd$Day <- relevel(as.factor(rd$Day), ref=ref)
+  rd
+}
+cat("--- CME-1 ---\n")
+print(get_rd(ps,"CEP_Age","D01") %>% t_test(value~Day, ref.group="D01") %>% add_significance())
+cat("--- CME-2 ---\n")
+print(get_rd(ps,"BCEP","D01") %>% t_test(value~Day, ref.group="D01") %>% add_significance())
+```
+
+## Enterobacteriaceae Relative Abundance — LMM
+
+```{r fig2-entero-lmm, fig.width=9, fig.height=4}
+rm(list = ls())
+ps <- readRDS("CEPBCEPAging.rds")
+
+get_entero <- function(ps, exp) {
+  samdf <- data.frame(sample_data(ps))
+  keep  <- samdf$Experiment == exp & samdf$Category %in% c("Grazed_Lawn","worms")
+  pseq  <- prune_taxa(taxa_sums(prune_samples(rownames(samdf)[keep], ps)) > 0,
+                      prune_samples(rownames(samdf)[keep], ps))
+  y3    <- psmelt(transform_sample_counts(tax_glom(pseq,"Family"), function(x) x/sum(x)))
+  y3$Family <- as.character(y3$Family)
+  df    <- y3[y3$Family=="Enterobacteriaceae",]
+  df$Day_numeric <- as.numeric(gsub("[^0-9]","",df$Day))
+  df$Replicate   <- factor(df$Replicate)
+  lmm_w <- lmer(Abundance ~ Day_numeric + (1|Replicate), data=df[df$Category=="worms",])
+  lmm_l <- lmer(Abundance ~ Day_numeric + (1|Replicate), data=df[df$Category=="Grazed_Lawn",])
+  list(
+    avg  = df %>% group_by(Category, Day_numeric) %>%
+           dplyr::summarize(avg=mean(Abundance,na.rm=TRUE), sd=sd(Abundance,na.rm=TRUE),.groups="drop"),
+    wp   = summary(lmm_w)$coefficients["Day_numeric","Pr(>|t|)"],
+    lp   = summary(lmm_l)$coefficients["Day_numeric","Pr(>|t|)"]
+  )
+}
+
+e1 <- get_entero(ps, "CEP_Age")
+e2 <- get_entero(ps, "BCEP")
+
+cat_cols <- c(worms="red", Grazed_Lawn="darkgreen")
+cat_lbls <- c(worms="Worm gut", Grazed_Lawn="Grazed lawn")
+
+make_ep <- function(d, label, wp, lp) {
+  ann <- paste0(label,"\nworms: p = ",format(round(wp,3),nsmall=3),
+                ",\ngrazed lawn: p = ",format(round(lp,3),nsmall=3))
+  ggplot(d, aes(x=Day_numeric, y=avg, color=Category, group=Category)) +
+    geom_line(linewidth=0.9) +
+    geom_errorbar(aes(ymin=avg-sd, ymax=avg+sd), width=0.3) +
+    geom_point(size=2.5) +
+    annotate("text", x=-Inf, y=Inf, hjust=-0.08, vjust=1.4, label=ann, size=3.5) +
+    scale_color_manual(values=cat_cols, labels=cat_lbls) +
+    scale_x_continuous(breaks=sort(unique(d$Day_numeric))) +
+    labs(x="Day", y="Enterobacteriaceae relative abundance", color=NULL) +
+    theme_classic(base_size=12) + theme(legend.position="none")
+}
+
+leg_p <- ggplot(data.frame(Category=factor(c("worms","Grazed_Lawn"))),
+                aes(x=1,y=1,color=Category,group=Category)) +
+  geom_line() + geom_point() +
+  scale_color_manual(values=cat_cols, labels=cat_lbls) + labs(color=NULL) +
+  theme_classic() + theme(legend.text=element_text(size=11))
+
+combined <- cowplot::plot_grid(
+  make_ep(e1$avg,"CME-1",e1$wp,e1$lp) + labs(tag="A"),
+  make_ep(e2$avg,"CME-2",e2$wp,e2$lp) + labs(tag="B"),
+  cowplot::get_legend(leg_p),
+  ncol=3, rel_widths=c(1,1,0.28), align="h", axis="tb")
+
+print(combined)
+ggsave("Fig_Entero_LMM_CME1_CME2.pdf", combined, height=4, width=9)
+```
+
+---
+
+# Session Information
+
+```{r session-info}
+sessionInfo()
+```
