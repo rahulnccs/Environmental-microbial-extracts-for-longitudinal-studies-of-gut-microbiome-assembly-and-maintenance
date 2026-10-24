@@ -1,6 +1,6 @@
 ---
 title: "CME Microbiome Method Paper — Complete Analysis Code"
-subtitle: "Figures 1 & 2: CME Stability and CME Aging Experiments"
+subtitle: "Figures 1 & 2: CME Stability and CME Aging Experiments (public GitHub version)"
 author: "Rahul Bodkhe"
 date: "March 3, 2026"
 output:
@@ -44,9 +44,13 @@ Statistical outputs and plots are shown inline.
 PDF files for each panel are saved to the working directory for import into Adobe Illustrator.
 :::
 
-> **Data availability**  
-> Raw sequencing reads: NCBI SRA (accession provided in manuscript).  
-> Processed phyloseq objects and OTU/taxonomy tables are exported as CSV files by this script.
+> **Data availability**
+> Raw sequencing reads: NCBI SRA (accession provided in manuscript).
+> This script runs entirely from the four phyloseq objects in `../phyloseq_objects/`
+> (already filtered/QC'd exactly as described in the Methods — this script does not
+> re-derive that filtering). Supplementary Tables 1–2 (reads per sample; merged ASV
+> counts + taxonomy) and the per-dataset phylogenetic trees are published as static
+> files in `../supplementary_tables/` rather than regenerated here.
 
 ---
 
@@ -68,6 +72,8 @@ library(patchwork)
 library(cowplot)
 library(lme4)
 library(lmerTest)
+library(ape)
+library(openxlsx)
 ```
 
 ---
@@ -134,12 +140,12 @@ family_base_colors <- c(
 )
 
 taxa_files <- c(
-  "../00_InputFiles/04_RDSfilesFromWynton/Figure01_CME_Stab_taxonomy.rds",
-  "../00_InputFiles/04_RDSfilesFromWynton/Figure_02_CME_Aging_taxonomy.rds",
-  "../00_InputFiles/04_RDSfilesFromWynton/Figure_03_BCEP_Aging_taxonomy.rds"
+  "../phyloseq_objects/Figure01_CEP_Age_pseq.rds",
+  "../phyloseq_objects/Figure_02_CME_Aging_pseq.rds",
+  "../phyloseq_objects/Figure_03_BCME_Aging_pseq.rds"
 )
 tax_all <- do.call(rbind, lapply(taxa_files, function(f) {
-  tt <- readRDS(f)
+  tt <- phyloseq::tax_table(readRDS(f))
   data.frame(Family = as.character(tt[, "Family"]),
              Genus  = as.character(tt[, "Genus"]),
              stringsAsFactors = FALSE)
@@ -199,38 +205,12 @@ saveRDS(family_base_colors, "family_base_colors.rds")
 
 ```{r fig1-build-phyloseq}
 rm(list = ls())
-seqtab.nochim <- readRDS("../00_InputFiles/04_RDSfilesFromWynton/Figure01_CME_Stab_seqtab.rds")
-taxa          <- readRDS("../00_InputFiles/04_RDSfilesFromWynton/Figure01_CME_Stab_taxonomy.rds")
-fitGTR        <- readRDS("../00_InputFiles/04_RDSfilesFromWynton/Figure01_CME_Stab_fitGTR.rds")
-meta_table    <- read.csv("../00_InputFiles/05_MetdataFiles/metadata.csv",
-                          row.names = 1, check.names = FALSE)
-
-samdf         <- sample_data(meta_table)
-unrooted_tree <- fitGTR$tree
-
-ps1   <- phyloseq(otu_table(seqtab.nochim, taxa_are_rows = FALSE),
-                  tax_table(taxa), phy_tree(unrooted_tree), samdf)
-
-pseq0 <- subset_taxa(ps1,  Family != "Mitochondria")
-pseq1 <- prune_taxa(taxa_sums(pseq0) > 9, pseq0)
-pseq  <- prune_samples(sample_sums(pseq1) >= 9, pseq1)
-
-# Recode weekly labels → day numbers to match figure axis labels
-sample_data(pseq)$Day <- dplyr::recode(
-  as.character(sample_data(pseq)$Day),
-  "Wk01" = "D05", "Wk02" = "D08"
-)
-
-saveRDS(pseq, "Figure01_CEP_Age_pseq.rds")
+# Loads the final, already-filtered/QC'd phyloseq object for Figure 1
+# (mitochondria removed, low-abundance ASVs and low-depth samples pruned,
+# weekly labels recoded to day numbers — see Methods for the exact criteria).
+pseq <- readRDS("../phyloseq_objects/Figure01_CEP_Age_pseq.rds")
+saveRDS(pseq, "Figure01_CEP_Age_pseq.rds")  # local copy so later chunks' bare readRDS() still works
 pseq
-```
-
-### Supplementary Data Export
-
-```{r fig1-supp-export, message=FALSE}
-write.csv(as.data.frame(otu_table(pseq)), "Supplementary_OTU_Table_Figure01.csv")
-write.csv(as.data.frame(tax_table(pseq)), "Supplementary_Taxonomy_Table_Figure01.csv")
-message("Supplementary files written for Figure 1.")
 ```
 
 ## Panel B — Stacked Bar Plot (Genus Level)
@@ -497,44 +477,21 @@ print(adonis2(distance(ps_p, "unifrac", weighted=TRUE) ~ Day,
 
 ```{r fig2-build-cme1}
 rm(list = ls())
-seqtab.nochim <- readRDS("../00_InputFiles/04_RDSfilesFromWynton/Figure_02_CME_Aging_seqtab.rds")
-taxa          <- readRDS("../00_InputFiles/04_RDSfilesFromWynton/Figure_02_CME_Aging_taxonomy.rds")
-fitGTR        <- readRDS("../00_InputFiles/04_RDSfilesFromWynton/Figure_02_CME_Aging_fitGTR.rds")
-meta_table    <- read.csv("../00_InputFiles/05_MetdataFiles/metadata.csv",
-                          row.names = 1, check.names = FALSE)
-samdf         <- sample_data(meta_table)
-ps1   <- phyloseq(otu_table(seqtab.nochim, taxa_are_rows = FALSE),
-                  tax_table(taxa), phy_tree(fitGTR$tree), samdf)
-pseq0 <- subset_taxa(ps1,  Family != "Mitochondria")
-pseq1 <- prune_taxa(taxa_sums(pseq0) > 2, pseq0)
-pseq  <- prune_samples(sample_sums(pseq1) >= 9, pseq1)
-saveRDS(pseq, "Figure_02_CME_Aging_pseq.rds")
-write.csv(as.data.frame(otu_table(pseq)), "Supplementary_OTU_Table_Figure02_CME1.csv")
-write.csv(as.data.frame(tax_table(pseq)), "Supplementary_Taxonomy_Table_Figure02_CME1.csv")
+# Final, already-filtered/QC'd CME-1 phyloseq object (mitochondria removed,
+# low-abundance ASVs and low-depth samples pruned — see Methods).
+pseq <- readRDS("../phyloseq_objects/Figure_02_CME_Aging_pseq.rds")
+saveRDS(pseq, "Figure_02_CME_Aging_pseq.rds")  # local copy so later chunks' bare readRDS() still works
 pseq
 ```
 
 ### CME-2
 
 ```{r fig2-build-cme2}
-seqtab.nochim <- readRDS("../00_InputFiles/04_RDSfilesFromWynton/Figure_03_BCEP_Aging_seqtab.rds")
-taxa          <- readRDS("../00_InputFiles/04_RDSfilesFromWynton/Figure_03_BCEP_Aging_taxonomy.rds")
-fitGTR        <- readRDS("../00_InputFiles/04_RDSfilesFromWynton/Figure_03_BCEP_Stab_fitGTR.rds")
-meta_table    <- read.csv("../00_InputFiles/05_MetdataFiles/metadata.csv",
-                          row.names = 1, check.names = FALSE)
-samdf  <- sample_data(meta_table)
-phylo  <- phyloseq(otu_table(seqtab.nochim, taxa_are_rows = FALSE),
-                   tax_table(taxa), phy_tree(fitGTR$tree), samdf)
-ps0    <- subset_samples(phylo,
-           SampleType == "worm" | SampleType == "Grazed_Lawn" |
-           (SampleType == "Stock_CME" & Day == "D07"))
-ps1    <- subset_samples(ps0, Experiment != "CEP_Age" & !(Day %in% c("D02", "D04")))
-pseq0  <- subset_taxa(ps1,  Family != "Mitochondria")
-pseq1  <- prune_taxa(taxa_sums(pseq0) > 2, pseq0)
-pseq   <- prune_samples(sample_sums(pseq1) >= 9, pseq1)
-saveRDS(pseq, "Figure_03_BCME_Aging_pseq.rds")
-write.csv(as.data.frame(otu_table(pseq)), "Supplementary_OTU_Table_Figure02_CME2.csv")
-write.csv(as.data.frame(tax_table(pseq)), "Supplementary_Taxonomy_Table_Figure02_CME2.csv")
+# Final, already-filtered/QC'd CME-2 (BCEP) phyloseq object: only the
+# worm, grazed-lawn, and Day-07 Stock_CME samples analyzed in the paper are
+# present — see Methods for sample selection and QC criteria.
+pseq <- readRDS("../phyloseq_objects/Figure_03_BCME_Aging_pseq.rds")
+saveRDS(pseq, "Figure_03_BCME_Aging_pseq.rds")  # local copy so later chunks' bare readRDS() still works
 pseq
 ```
 
@@ -542,15 +499,14 @@ pseq
 
 ```{r fig2-merge}
 rm(list = ls())
-ps1 <- readRDS("Figure_02_CME_Aging_pseq.rds")
-ps2 <- readRDS("Figure_03_BCME_Aging_pseq.rds")
-ps1_noTree <- phyloseq(otu_table(ps1), tax_table(ps1), sample_data(ps1))
-ps2_noTree <- phyloseq(otu_table(ps2), tax_table(ps2), sample_data(ps2))
-ps_merged  <- merge_phyloseq(ps1_noTree, ps2_noTree)
-pseq0 <- subset_taxa(ps_merged, Family != "Mitochondria")
-pseq1 <- prune_taxa(taxa_sums(pseq0) > 1, pseq0)
-pseq  <- prune_samples(sample_sums(pseq1) >= 9, pseq1)
-saveRDS(pseq, "CEPBCEPAging.rds")
+# Tree-free, full 9231-taxon merged object (identical to what the original
+# analysis's own merge step produces) — Panel D and the Enterobacteriaceae
+# LMM use this directly. Panels B/C need a tree, which they attach
+# themselves in fig2BC-load from a small separately-published tree file
+# (see that chunk) — attaching a tree there also drops ASVs the tree
+# doesn't cover, which must only affect Panels B/C, not Panel D or the LMM.
+pseq <- readRDS("../phyloseq_objects/CEPBCEPAging.rds")
+saveRDS(pseq, "CEPBCEPAging.rds")  # local copy so later chunks' bare readRDS() still works
 pseq
 ```
 
@@ -636,10 +592,14 @@ ggsave("Fig2A_StackPlot_CME1_CME2.pdf", p_A, height=total_h, width=total_w, limi
 ```{r fig2BC-load}
 rm(list = ls())
 set.seed(125)
-ps     <- readRDS("CEPBCEPAging.rds")
-fitGTR <- readRDS("Figure2_CEP_BCEP_Stab_fitGTR_Full.rds")
-pseq   <- merge_phyloseq(ps, fitGTR$tree)
-phy_tree(pseq) <- midpoint.root(phy_tree(pseq))
+# The tree is published separately as just the already-fitted,
+# midpoint-rooted `phylo` object (a few MB), not the full ~135MB fitGTR fit
+# — merging it in here reproduces the original's merge_phyloseq(ps, tree)
+# step exactly, including the same taxa drop (9231 -> 8275) that step
+# always caused, which is specific to Panels B/C.
+ps   <- readRDS("CEPBCEPAging.rds")
+tree <- readRDS("../phyloseq_objects/CEPBCEPAging_tree.rds")
+pseq <- merge_phyloseq(ps, tree)
 day_colors <- c(Stock_CME="gray", D00="#1A9850", D01="#66BD63", D03="#A6D96A",
                 D05="#FDAE61", D07="#F46D43", D08="darkred", D09="black")
 ```
@@ -670,8 +630,10 @@ set.seed(9567); print(adonis2(phyloseq::distance(ps_c1c,"wunifrac") ~ SampleType
 ```
 
 ```{r fig2C-plot, fig.width=5, fig.height=3.5}
-ps_c2  <- prune_taxa(taxa_sums(subset_samples(pseq,Experiment!="CEP_Age"&!(Day%in%c("D02","D04"))))>1,
-                     subset_samples(pseq,Experiment!="CEP_Age"&!(Day%in%c("D02","D04"))))
+# Note: the merged object already contains only the CME-2 samples analyzed
+# in the paper, so this subset just picks out the CME-2 (non-CEP_Age) panel.
+ps_c2  <- prune_taxa(taxa_sums(subset_samples(pseq,Experiment!="CEP_Age"))>1,
+                     subset_samples(pseq,Experiment!="CEP_Age"))
 set.seed(9567)
 ps_c2c <- microbiome::transform(ps_c2, "compositional")
 ord2   <- ordinate(ps_c2c, "PCoA", "unifrac", weighted=TRUE)
@@ -807,6 +769,26 @@ combined <- cowplot::plot_grid(
 print(combined)
 ggsave("Fig_Entero_LMM_CME1_CME2.pdf", combined, height=4, width=9)
 ```
+
+---
+
+## Supplementary Tables (reads per sample, merged ASV counts + taxonomy, phylogenetic trees)
+
+These are published as static files in `../supplementary_tables/` rather
+than regenerated by this script (they're built once, from the DADA2
+pipeline logs and raw metadata, which aren't part of this repo):
+
+- **`Supplementary_Tables_1-2.xlsx`**, sheet "Table1_Reads_Per_Sample" —
+  DADA2 read-tracking (input → filtered → denoised → merged → non-chimeric)
+  for every sample retained in the final analysis, joined to sample
+  metadata.
+- **`Supplementary_Tables_1-2.xlsx`**, sheet "Table2_ASV_Taxonomy_Counts" —
+  a single merged ASV count + taxonomy table spanning all three datasets,
+  with CME/Day/SampleType/Replicate as header rows above each sample's
+  column.
+- **`Supplementary_Tree_Figure1.nwk`, `..._Figure2_CME1.nwk`,
+  `..._Figure2_CME2.nwk`** — one phylogenetic tree per dataset (Newick
+  format); each is also already attached to its phyloseq object above.
 
 ---
 
