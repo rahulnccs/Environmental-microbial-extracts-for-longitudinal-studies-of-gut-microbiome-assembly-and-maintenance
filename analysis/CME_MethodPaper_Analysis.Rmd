@@ -625,8 +625,62 @@ ggsave("Fig2B_PCoA_CME1.pdf", p_B, height=3.5, width=5)
 
 ```{r fig2B-permanova}
 phy_tree(ps_c1c) <- phytools::midpoint.root(phy_tree(ps_c1c))
-set.seed(9567); print(adonis2(phyloseq::distance(ps_c1c,"wunifrac") ~ SampleType,
+set.seed(9567); print(adonis2(phyloseq::distance(ps_c1c,"wunifrac") ~ Category,
                               data=data.frame(sample_data(ps_c1c)), permutations=999))
+library(phyloseq)
+library(vegan)
+
+# Root phylogenetic tree
+phy_tree(ps_c1c) <- phytools::midpoint.root(phy_tree(ps_c1c))
+
+# Calculate weighted UniFrac distance
+dist_wunifrac <- phyloseq::distance(ps_c1c, method = "wunifrac")
+
+# Extract metadata
+meta <- data.frame(sample_data(ps_c1c))
+meta$Category <- as.character(meta$Category)
+
+# Define pairwise comparisons
+comparisons <- list(
+  c("Grazed_Lawn", "Stock_CME"),
+  c("worms", "Stock_CME"),
+  c("Grazed_Lawn", "worms")
+)
+
+# Run pairwise PERMANOVA
+set.seed(9567)
+
+pairwise_results <- lapply(comparisons, function(groups) {
+
+  # Identify samples belonging to the two groups
+  selected_samples <- rownames(meta)[meta$Category %in% groups]
+
+  # Subset metadata
+  meta_sub <- meta[selected_samples, , drop = FALSE]
+
+  # Subset distance matrix
+  dist_sub <- as.dist(as.matrix(dist_wunifrac)[
+    selected_samples,
+    selected_samples
+  ])
+
+  # Run PERMANOVA
+  adonis2(
+    dist_sub ~ Category,
+    data = meta_sub,
+    permutations = 999
+  )
+})
+
+# Name comparisons
+names(pairwise_results) <- c(
+  "Grazed_Lawn_vs_Stock_CME",
+  "worms_vs_Stock_CME",
+  "Grazed_Lawn_vs_worms"
+)
+
+# Print results
+pairwise_results
 ```
 
 ```{r fig2C-plot, fig.width=5, fig.height=3.5}
@@ -652,8 +706,56 @@ ggsave("Fig2C_PCoA_CME2.pdf", p_C, height=3.5, width=5)
 
 ```{r fig2C-permanova}
 phy_tree(ps_c2c) <- phytools::midpoint.root(phy_tree(ps_c2c))
-set.seed(9567); print(adonis2(phyloseq::distance(ps_c2c,"wunifrac") ~ SampleType,
+set.seed(9567); print(adonis2(phyloseq::distance(ps_c2c,"wunifrac") ~ Category,
                               data=data.frame(sample_data(ps_c2c)), permutations=999))
+phy_tree(ps_c2c) <- phytools::midpoint.root(phy_tree(ps_c2c))
+
+# Calculate weighted UniFrac distance
+dist_wunifrac <- phyloseq::distance(ps_c2c, method = "wunifrac")
+
+# Extract metadata
+meta <- data.frame(sample_data(ps_c2c))
+meta$Category <- as.character(meta$Category)
+
+# Define pairwise comparisons
+comparisons <- list(
+  c("Grazed_Lawn", "Stock_CME"),
+  c("worms", "Stock_CME"),
+  c("Grazed_Lawn", "worms")
+)
+
+# Run pairwise PERMANOVA
+set.seed(9567)
+
+pairwise_results <- lapply(comparisons, function(groups) {
+
+  # Identify samples belonging to the two groups
+  selected_samples <- rownames(meta)[meta$Category %in% groups]
+
+  # Subset metadata
+  meta_sub <- meta[selected_samples, , drop = FALSE]
+
+  # Subset distance matrix
+  dist_sub <- as.dist(as.matrix(dist_wunifrac)[
+    selected_samples,
+    selected_samples
+  ])
+
+  # Run PERMANOVA
+  adonis2(
+    dist_sub ~ Category,
+    data = meta_sub,
+    permutations = 999
+  )
+})
+
+# Name comparisons
+names(pairwise_results) <- c(
+  "Grazed_Lawn_vs_Stock_CME",
+  "worms_vs_Stock_CME",
+  "Grazed_Lawn_vs_worms")
+
+pairwise_results
 ```
 
 ## Panel D — Shannon Diversity (Worms)
